@@ -1,0 +1,145 @@
+/* Tailwind v4: single import */
+@import "tailwindcss";
+
+/* =========================
+   THEME TOKENS (OKLCH Blue)
+   ========================= */
+:root {
+  /* Brand / primary */
+  --primary: 60% 0.17 254;
+  /* blue */
+  --primary-foreground: 98% 0.02 260;
+
+  /* Focus ring / borders / surfaces */
+  --ring: 70% 0.12 254;
+  --border: 92% 0.02 255;
+
+  /* Base colors */
+  --background: 100% 0 0;
+  /* white */
+  --foreground: 22% 0.02 255;
+  /* near-black */
+
+  /* Muted */
+  --muted: 97% 0.01 255;
+  --muted-foreground: 40% 0.02 255;
+}
+
+/* Optional dark mode (keeps same blue hue) */
+.dark {
+  --background: 16% 0.02 255;
+  --foreground: 98% 0.02 255;
+  --muted: 22% 0.02 255;
+  --muted-foreground: 80% 0.03 255;
+  --border: 28% 0.02 255;
+  --primary: 65% 0.15 254;
+  --primary-foreground: 98% 0.02 260;
+}
+
+/* =========================
+   GLOBAL ELEMENT STYLES
+   ========================= */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  color: oklch(var(--foreground));
+  background: oklch(var(--background));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+::selection {
+  background: oklch(var(--primary) / 0.18);
+}
+
+/* Links: subtle underline on hover (top nav overrides below) */
+a {
+  @apply underline-offset-2 hover:underline;
+}
+
+nav a {
+  @apply no-underline;
+}
+
+/* =========================
+   REUSABLE PRIMITIVES
+   ========================= */
+
+/* Buttons */
+.btn {
+  @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2;
+  background: oklch(var(--primary));
+  color: oklch(var(--primary-foreground));
+  box-shadow: 0 0 0 0 oklch(var(--ring));
+}
+
+.btn:focus-visible {
+  box-shadow: 0 0 0 2px oklch(var(--ring));
+}
+
+.btn:hover {
+  opacity: .92;
+}
+
+.btn-outline {
+  @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium border transition-colors disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2;
+  border-color: oklch(var(--border));
+  background: white;
+  color: oklch(22% 0.02 255);
+}
+
+.btn-outline:hover {
+  background: oklch(var(--muted));
+}
+
+.btn-outline:focus-visible {
+  box-shadow: 0 0 0 2px oklch(var(--ring));
+}
+
+/* Cards */
+.card {
+  @apply rounded-2xl border overflow-hidden bg-white;
+  border-color: oklch(var(--border));
+}
+
+/* Inputs / Textareas (nice default focus) */
+.input,
+.textarea,
+input,
+textarea,
+select {
+  @apply rounded-xl border px-3 py-2 outline-none;
+  border-color: oklch(var(--border));
+  background: white;
+}
+
+.input:focus,
+.textarea:focus,
+input:focus,
+textarea:focus,
+select:focus {
+  @apply ring-2;
+  box-shadow: 0 0 0 2px oklch(var(--ring));
+}
+
+/* Utility helpers */
+.container-page {
+  @apply mx-auto max-w-6xl px-6 py-8;
+}
+
+.muted {
+  color: oklch(var(--muted-foreground));
+}
+
+.surface-muted {
+  background: oklch(var(--muted));
+}
+
+.border-token {
+  border-color: oklch(var(--border));
+}
