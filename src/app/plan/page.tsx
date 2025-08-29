@@ -40,8 +40,7 @@ type PlanItem = {
 type RecipeLite = { id: string; title: string };
 type RecipeWithIngs = { id: string; title: string; ingredients: string[] | null };
 
-/* ============ grocery helpers ============ */
-// dedupe case-insensitive, keep first-seen casing
+/* ===== grocery helpers: dedupe case-insensitive, keep first casing ===== */
 function dedupeIngredients(lines: string[]) {
     const map = new Map<string, string>();
     for (const l of lines) {
@@ -50,6 +49,24 @@ function dedupeIngredients(lines: string[]) {
         if (!map.has(key)) map.set(key, l.trim());
     }
     return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
+
+/* ===== ensure a profile row exists in public.users so FKs succeed ===== */
+async function ensureUserProfile(user: {
+    id: string;
+    email?: string | null;
+    user_metadata?: any;
+}) {
+    const payload = {
+        id: user.id,
+        email: user.email ?? null,
+        name:
+            (user.user_metadata?.name as string | undefined) ??
+            (user.user_metadata?.full_name as string | undefined) ??
+            null,
+    };
+    // Upsert on primary key 'id'. If the row already exists, this is a no-op.
+    await supabase.from("users").upsert(payload);
 }
 
 /* ============ Recipe Picker modal ============ */
@@ -66,16 +83,19 @@ function RecipePicker({
 }) {
     const [recipes, setRecipes] = useState<RecipeLite[]>([]);
     const [query, setQuery] = useState("");
+    const [err, setErr] = useState<string | null>(null);
 
     useEffect(() => {
         if (!open) return;
         (async () => {
+            setErr(null);
             const { data, error } = await supabase
                 .from("recipes")
                 .select("id,title,created_at")
                 .eq("owner_id", ownerId)
                 .order("created_at", { ascending: false });
-            if (!error) setRecipes((data ?? []).map(r => ({ id: r.id, title: r.title })));
+            if (error) setErr(error.message);
+            else setRecipes((data ?? []).map(r => ({ id: r.id, title: r.title })));
         })();
     }, [open, ownerId]);
 
@@ -88,25 +108,32 @@ function RecipePicker({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-            <div className="card w-full max-w-2xl">
+            <div className="w-full max-w-3xl rounded-2xl border border-token bg-white shadow-lg">
                 <div className="flex items-center justify-between border-b border-token px-5 py-3">
-                    <h3 className="font-semibold">Pick a recipe</h3>
-                    <button className="btn-outline px-2 py-1 text-sm" onClick={onClose}>Close</button>
+                    <h3 className="text-lg font-semibold">Pick a recipe</h3>
+                    <button className="btn-outline px-3 py-1.5 text-sm" onClick={onClose}>
+                        Close
+                    </button>
                 </div>
 
                 <div className="p-5">
+                    {err && (
+                        <div className="mb-4 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                            {err}
+                        </div>
+                    )}
                     <input
                         className="input mb-4 w-full"
                         placeholder="Search recipes…"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                     />
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         {filtered.map(r => (
                             <button
                                 key={r.id}
-                                className="card text-left transition hover:shadow-sm p-3"
-                                onClick={() => { onSelect(r); onClose(); }}
+                                className="rounded-xl border border-token px-4 py-3 text-left transition hover:shadow-sm"
+                                onClick={() => onSelect(r)}
                             >
                                 <div className="font-medium line-clamp-1">{r.title}</div>
                             </button>
@@ -133,95 +160,116 @@ export default function PlanPage() {
     const [plan, setPlan] = useState<MealPlan | null>(null);
     const [items, setItems] = useState<PlanItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [globalErr, setGlobalErr] = useState<string | null>(null);
 
-    const [picker, setPicker] = useState<{ open: boolean; day: number; meal: MealType } | null>(null);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [pickerTarget, setPickerTarget] = useState<{ day: number; meal: MealType } | null>(null);
 
     // grocery drawer state
     const [showGroceries, setShowGroceries] = useState(false);
     const [groceryItems, setGroceryItems] = useState<string[]>([]);
     const [checked, setChecked] = useState<Set<string>>(new Set());
 
+    async function fetchItemsFor(planId: string) {
+        const { data, error } = await supabase
+            .from("plan_items")
+            .select("id, meal_plan_id, day, meal_type, recipe_id, notes")
+            .eq("meal_plan_id", planId)
+            .order("day", { ascending: true });
+        if (error) throw new Error(error.message);
+        setItems(data ?? []);
+    }
+
     // Create/get the week's meal_plan and load its items
     useEffect(() => {
         if (!session?.user?.id) return;
         (async () => {
             setLoading(true);
+            setGlobalErr(null);
+            try {
+                // ✅ ensure a profile row exists so meal_plans.user_id FK passes
+                await ensureUserProfile({
+                    id: session.user.id,
+                    email: session.user.email ?? null,
+                    user_metadata: session.user.user_metadata ?? {},
+                });
 
-            // Get or create meal_plan
-            const { data: existing, error: selErr } = await supabase
-                .from("meal_plans")
-                .select("id, week_start, user_id")
-                .eq("user_id", session.user.id)
-                .eq("week_start", weekStartYMD)
-                .maybeSingle();
-
-            if (selErr) {
-                setLoading(false);
-                return;
-            }
-
-            let planRow: MealPlan | null = existing ?? null;
-            if (!planRow) {
-                const { data, error } = await supabase
+                // find or create meal_plan for this week
+                const { data: existing, error: selErr } = await supabase
                     .from("meal_plans")
-                    .insert({ user_id: session.user.id, week_start: weekStartYMD })
                     .select("id, week_start, user_id")
-                    .single();
-                if (error) {
-                    setLoading(false);
-                    return;
+                    .eq("user_id", session.user.id)
+                    .eq("week_start", weekStartYMD)
+                    .maybeSingle();
+                if (selErr) throw new Error(selErr.message);
+
+                let planRow: MealPlan | null = existing ?? null;
+                if (!planRow) {
+                    const { data, error } = await supabase
+                        .from("meal_plans")
+                        .insert({ user_id: session.user.id, week_start: weekStartYMD })
+                        .select("id, week_start, user_id")
+                        .single();
+                    if (error) throw new Error(error.message);
+                    planRow = data as MealPlan;
                 }
-                planRow = data as MealPlan;
+
+                setPlan(planRow);
+                await fetchItemsFor(planRow.id);
+
+                // reset drawer when week changes
+                setShowGroceries(false);
+                setChecked(new Set());
+                setGroceryItems([]);
+            } catch (e: any) {
+                setGlobalErr(e.message ?? "Failed to load plan.");
+            } finally {
+                setLoading(false);
             }
-            setPlan(planRow);
-
-            // Fetch plan_items
-            const { data: rows } = await supabase
-                .from("plan_items")
-                .select("id, meal_plan_id, day, meal_type, recipe_id, notes")
-                .eq("meal_plan_id", planRow.id)
-                .order("day", { ascending: true });
-
-            setItems(rows ?? []);
-            setLoading(false);
-
-            // reset drawer when week changes
-            setShowGroceries(false);
-            setChecked(new Set());
-            setGroceryItems([]);
         })();
     }, [session?.user?.id, weekStartYMD]);
 
     async function addRecipeToCell(recipe: RecipeLite, day: number, meal: MealType) {
         if (!plan) return;
-        const { data, error } = await supabase
-            .from("plan_items")
-            .insert({
-                meal_plan_id: plan.id,
-                day,
-                meal_type: meal,
-                recipe_id: recipe.id,
-                notes: null,
-            })
-            .select("*")
-            .single();
-        if (!error && data) setItems(prev => [...prev, data]);
+        setGlobalErr(null);
+        try {
+            const { error } = await supabase
+                .from("plan_items")
+                .insert({
+                    meal_plan_id: plan.id,
+                    day,
+                    meal_type: meal,
+                    recipe_id: recipe.id,
+                    notes: null,
+                });
+            if (error) throw new Error(error.message);
+            await fetchItemsFor(plan.id); // refresh grid
+        } catch (e: any) {
+            setGlobalErr(e.message ?? "Failed to add recipe.");
+            console.error("Add plan_item error:", e);
+        }
     }
 
     async function removeItem(id: string) {
-        const { error } = await supabase.from("plan_items").delete().eq("id", id);
-        if (!error) setItems(prev => prev.filter(p => p.id !== id));
+        if (!plan) return;
+        setGlobalErr(null);
+        try {
+            const { error } = await supabase.from("plan_items").delete().eq("id", id);
+            if (error) throw new Error(error.message);
+            await fetchItemsFor(plan.id);
+        } catch (e: any) {
+            setGlobalErr(e.message ?? "Failed to remove item.");
+        }
     }
 
-    // tiny title map for display (optional but nice)
+    // title map for display
     const [recipeTitleMap, setRecipeTitleMap] = useState<Map<string, string>>(new Map());
     useEffect(() => {
         const ids = Array.from(new Set(items.map(i => i.recipe_id).filter(Boolean))) as string[];
         if (!ids.length) return;
         (async () => {
-            const missing = ids.filter(id => !recipeTitleMap.has(id));
-            if (!missing.length) return;
-            const { data } = await supabase.from("recipes").select("id,title").in("id", missing);
+            const { data, error } = await supabase.from("recipes").select("id,title").in("id", ids);
+            if (error) return;
             const map = new Map(recipeTitleMap);
             (data ?? []).forEach(r => map.set(r.id, r.title));
             setRecipeTitleMap(map);
@@ -231,7 +279,6 @@ export default function PlanPage() {
 
     async function openGroceryList() {
         if (!plan) return;
-
         const recipeIds = Array.from(new Set(items.map(i => i.recipe_id).filter(Boolean))) as string[];
         if (!recipeIds.length) {
             setGroceryItems([]);
@@ -240,10 +287,14 @@ export default function PlanPage() {
             return;
         }
 
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from("recipes")
             .select("id,title,ingredients")
             .in("id", recipeIds);
+        if (error) {
+            setGlobalErr(error.message);
+            return;
+        }
 
         const allLines: string[] = [];
         (data as RecipeWithIngs[] | null)?.forEach(r => (r.ingredients ?? []).forEach(l => allLines.push(l)));
@@ -265,6 +316,13 @@ export default function PlanPage() {
     return (
         <LoginGate>
             <main className="container-page">
+                {/* Global error */}
+                {globalErr && (
+                    <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                        {globalErr}
+                    </div>
+                )}
+
                 {/* Header */}
                 <div className="mb-6 flex items-center justify-between">
                     <button className="btn-outline" onClick={() => setAnchorDate(d => addWeeks(d, -1))}>
@@ -314,6 +372,9 @@ export default function PlanPage() {
                                         return (
                                             <td key={dayIndex} className="p-3 align-top">
                                                 <div className="flex flex-col gap-2">
+                                                    {cellItems.length === 0 && (
+                                                        <p className="muted text-xs">Nothing here yet.</p>
+                                                    )}
                                                     {cellItems.map(it => (
                                                         <div
                                                             key={it.id}
@@ -335,7 +396,10 @@ export default function PlanPage() {
 
                                                     <button
                                                         className="btn-outline text-xs"
-                                                        onClick={() => setPicker({ open: true, day: dayIndex, meal })}
+                                                        onClick={() => {
+                                                            setPickerTarget({ day: dayIndex, meal });
+                                                            setPickerOpen(true);
+                                                        }}
                                                     >
                                                         + Add
                                                     </button>
@@ -353,12 +417,15 @@ export default function PlanPage() {
             </main>
 
             {/* Recipe picker modal */}
-            {picker && session?.user?.id && (
+            {pickerOpen && pickerTarget && session?.user?.id && (
                 <RecipePicker
-                    open={picker.open}
+                    open={pickerOpen}
                     ownerId={session.user.id}
-                    onClose={() => setPicker(null)}
-                    onSelect={(r) => addRecipeToCell(r, picker.day, picker.meal)}
+                    onClose={() => setPickerOpen(false)}
+                    onSelect={(r) => {
+                        addRecipeToCell(r, pickerTarget.day, pickerTarget.meal);
+                        setPickerOpen(false);
+                    }}
                 />
             )}
 
