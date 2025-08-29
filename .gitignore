@@ -1,7 +1,7 @@
 # Node / package managers
 node_modules/
 .pnp.*
-.pnpm-store/
+.pnpm-store/ 
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
