@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import LoginGate from "@/components/loginGate";
 import { supabase } from "@/library/supabaseClient";
 import { useSession } from "@/hooks/useSession";
@@ -195,22 +195,23 @@ export default function PlanPage() {
     const [groceryItems, setGroceryItems] = useState<string[]>([]);
     const [checked, setChecked] = useState<Set<string>>(new Set());
 
-    // ---------- sticky header gap fix ----------
+    // ---------- sticky header gap fix (hydration-safe) ----------
     const wrapperRef = useRef<HTMLDivElement | null>(null);
-    const [stickyTop, setStickyTop] = useState(72); // fallback
+    // Start at 0 for SSR so server/client markup matches. Measure after hydration.
+    const [stickyTop, setStickyTop] = useState(0);
 
-    useLayoutEffect(() => {
+    useEffect(() => {
         const recalc = () => {
-            if (!wrapperRef.current) return;
-            const r = wrapperRef.current.getBoundingClientRect();
-            // distance from viewport top to wrapper + small breathing room
+            const el = wrapperRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
             setStickyTop(Math.max(0, Math.round(r.top) + 8));
         };
-        recalc();
+        recalc(); // initial measure after hydration
         window.addEventListener("resize", recalc);
         return () => window.removeEventListener("resize", recalc);
     }, []);
-    // -------------------------------------------
+    // ------------------------------------------------------------
 
     async function fetchItemsFor(planId: string) {
         const { data, error } = await supabase
@@ -411,16 +412,15 @@ export default function PlanPage() {
                     </div>
                 </div>
 
-                {/* grid (white-gap fix applied) */}
+                {/* grid (hydration-safe sticky gap) */}
                 <div
                     ref={wrapperRef}
                     className="overflow-x-auto rounded-2xl border border-token bg-white"
                     style={{ paddingTop: stickyTop }}
                 >
                     <table className="w-full text-sm" style={{ marginTop: -stickyTop }}>
-                        {/* sticky day headers */}
+                        {/* day headers (not sticky to avoid overlap issues) */}
                         <thead className="bg-[oklch(var(--muted))]">
-
                             <tr className="text-sm">
                                 <th className="p-3 text-left font-semibold bg-[oklch(var(--muted))] sticky left-0 z-20">
                                     Meal
