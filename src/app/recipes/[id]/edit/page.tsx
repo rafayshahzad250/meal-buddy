@@ -10,6 +10,7 @@ const BUCKET = "recipe-images";
 
 const splitTags = (s: string) => s.split(",").map(t => t.trim()).filter(Boolean);
 const splitLinks = (s: string) => s.split(/[\n,]/).map(t => t.trim()).filter(Boolean);
+const splitLines = (s: string) => s.split(/\r?\n/).map(x => x.trim()).filter(Boolean); // NEW
 
 export default function EditRecipePage() {
     const { id } = useParams<{ id: string }>();
@@ -21,6 +22,7 @@ export default function EditRecipePage() {
     const [time, setTime] = useState<number | "">("");
     const [tags, setTags] = useState("");
     const [links, setLinks] = useState("");
+    const [ingredientsText, setIngredientsText] = useState(""); // NEW
 
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [imagePath, setImagePath] = useState<string | null>(null);
@@ -56,6 +58,7 @@ export default function EditRecipePage() {
             setTime(data.cook_time_min ?? "");
             setTags((data.tags ?? []).join(", "));
             setLinks((data.source_urls ?? []).join("\n"));
+            setIngredientsText((data.ingredients ?? []).join("\n")); // NEW
             setImagePath(data.image_path ?? null);
 
             if (data.image_path) {
@@ -93,6 +96,7 @@ export default function EditRecipePage() {
 
         const tagArray = splitTags(tags).slice(0, 12);
         const urlArray = splitLinks(links).slice(0, 12);
+        const ingredientsArray = splitLines(ingredientsText); // NEW
 
         let uploadedNewPath: string | null = null;
         let uploadedNewUrl: string | null = null;
@@ -120,6 +124,7 @@ export default function EditRecipePage() {
                 cook_time_min: time === "" ? null : Number(time),
                 tags: tagArray.length ? tagArray : null,
                 source_urls: urlArray.length ? urlArray : null,
+                ingredients: ingredientsArray.length ? ingredientsArray : null, // NEW
             };
 
             if (uploadedNewPath) {
@@ -242,6 +247,24 @@ export default function EditRecipePage() {
                                 onChange={(e) => setLinks(e.target.value)}
                                 placeholder="One URL per line or comma-separated"
                             />
+                        </div>
+
+                        {/* Ingredients */}
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium">Ingredients (one per line)</label>
+                            <textarea
+                                className="textarea w-full"
+                                rows={6}
+                                value={ingredientsText}
+                                onChange={(e) => setIngredientsText(e.target.value)}
+                                placeholder={`e.g.\n2 chicken breasts\n1 tbsp olive oil\n2 cloves garlic`}
+                            />
+                            {!!ingredientsText && (
+                                <p className="muted text-xs">
+                                    {splitLines(ingredientsText).length} ingredient
+                                    {splitLines(ingredientsText).length === 1 ? "" : "s"}
+                                </p>
+                            )}
                         </div>
 
                         {/* Photo */}

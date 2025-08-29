@@ -19,6 +19,7 @@ type Recipe = {
     image_url: string | null;
     image_path: string | null;
     owner_id: string | null;
+    ingredients: string[] | null; // ✅ NEW
 };
 
 export default function RecipeDetailPage() {
@@ -41,7 +42,7 @@ export default function RecipeDetailPage() {
 
             const { data, error } = await supabase
                 .from("recipes")
-                .select("*")
+                .select("*") // includes ingredients now
                 .eq("id", id)
                 .single();
 
@@ -52,20 +53,20 @@ export default function RecipeDetailPage() {
             }
 
             // Prefer a fresh signed URL so detail page works with private buckets
-            let imageUrl = data.image_url as string | null;
-            if (data.image_path) {
+            let imageUrl = (data as Recipe).image_url as string | null;
+            if ((data as Recipe).image_path) {
                 const { data: signed, error: signErr } = await supabase.storage
                     .from(BUCKET)
-                    .createSignedUrl(data.image_path, 60 * 60); // 1 hour
+                    .createSignedUrl((data as Recipe).image_path as string, 60 * 60); // 1 hour
                 if (!signErr && signed?.signedUrl) {
                     imageUrl = signed.signedUrl;
                 } else {
-                    const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(data.image_path);
+                    const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl((data as Recipe).image_path as string);
                     imageUrl = pub?.publicUrl ?? imageUrl;
                 }
             }
 
-            setRecipe({ ...data, image_url: imageUrl });
+            setRecipe({ ...(data as Recipe), image_url: imageUrl });
             setLoading(false);
         })();
     }, [id]);
@@ -181,6 +182,20 @@ export default function RecipeDetailPage() {
                                 <p>{recipe.description}</p>
                             </div>
                         ) : null}
+
+                        {/* Ingredients */}
+                        {recipe.ingredients && recipe.ingredients.length > 0 && (
+                            <div className="mx-auto mt-6 max-w-2xl">
+                                <h2 className="text-center text-sm font-semibold uppercase tracking-wide muted">
+                                    Ingredients
+                                </h2>
+                                <ul className="mt-3 list-disc space-y-1 pl-6">
+                                    {recipe.ingredients.map((line, i) => (
+                                        <li key={i}>{line}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
                         {/* Links */}
                         {recipe.source_urls && recipe.source_urls.length > 0 ? (

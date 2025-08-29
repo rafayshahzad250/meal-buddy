@@ -10,6 +10,7 @@ const BUCKET = "recipe-images";
 
 const splitTags = (s: string) => s.split(",").map(t => t.trim()).filter(Boolean);
 const splitLinks = (s: string) => s.split(/[\n,]/).map(t => t.trim()).filter(Boolean);
+const splitLines = (s: string) => s.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 
 export default function NewRecipePage() {
     const [title, setTitle] = useState("");
@@ -17,6 +18,7 @@ export default function NewRecipePage() {
     const [time, setTime] = useState<number | "">("");
     const [tags, setTags] = useState("");
     const [links, setLinks] = useState("");
+    const [ingredientsText, setIngredientsText] = useState(""); // NEW
     const [file, setFile] = useState<File | null>(null);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export default function NewRecipePage() {
 
         const tagArray = splitTags(tags).slice(0, 12);
         const urlArray = splitLinks(links).slice(0, 12);
+        const ingredientsArray = splitLines(ingredientsText); // NEW
 
         let imageUrl: string | null = null;
         let imagePath: string | null = null;
@@ -53,9 +56,10 @@ export default function NewRecipePage() {
                     .from(BUCKET)
                     .createSignedUrl(path, 60 * 60);
 
-                imageUrl = !signErr && signed?.signedUrl
-                    ? signed.signedUrl
-                    : supabase.storage.from(BUCKET).getPublicUrl(path).data?.publicUrl ?? null;
+                imageUrl =
+                    !signErr && signed?.signedUrl
+                        ? signed.signedUrl
+                        : supabase.storage.from(BUCKET).getPublicUrl(path).data?.publicUrl ?? null;
 
                 imagePath = path;
             }
@@ -67,6 +71,7 @@ export default function NewRecipePage() {
                 cook_time_min: time === "" ? null : Number(time),
                 tags: tagArray.length ? tagArray : null,
                 source_urls: urlArray.length ? urlArray : null,
+                ingredients: ingredientsArray.length ? ingredientsArray : null, // NEW
                 image_url: imageUrl,
                 image_path: imagePath,
             });
@@ -161,6 +166,24 @@ export default function NewRecipePage() {
                                 onChange={(e) => setLinks(e.target.value)}
                                 placeholder={`Paste TikTok/YouTube/blog URLs\nOne per line or comma-separated`}
                             />
+                        </div>
+
+                        {/* ingredients */}
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium">Ingredients (one per line)</label>
+                            <textarea
+                                className="textarea w-full"
+                                rows={6}
+                                value={ingredientsText}
+                                onChange={(e) => setIngredientsText(e.target.value)}
+                                placeholder={`e.g.\n2 chicken breasts\n1 tbsp olive oil\n2 cloves garlic`}
+                            />
+                            {!!ingredientsText && (
+                                <p className="muted text-xs">
+                                    {splitLines(ingredientsText).length} ingredient
+                                    {splitLines(ingredientsText).length === 1 ? "" : "s"}
+                                </p>
+                            )}
                         </div>
 
                         {/* photo */}
